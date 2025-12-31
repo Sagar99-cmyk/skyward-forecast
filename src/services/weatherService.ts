@@ -1,5 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
-import { CurrentWeather, ForecastDay, WeatherCondition } from '@/types/weather';
+import { CurrentWeather, ForecastDay, HourlyForecast, WeatherAlert, WeatherCondition } from '@/types/weather';
 
 const mapCondition = (weatherId: number): WeatherCondition => {
   if (weatherId >= 200 && weatherId < 300) return 'thunderstorm';
@@ -11,11 +11,27 @@ const mapCondition = (weatherId: number): WeatherCondition => {
   return 'clouds';
 };
 
-export const getCurrentWeather = async (city: string): Promise<CurrentWeather> => {
-  console.log('Fetching current weather for:', city);
+interface WeatherRequest {
+  city?: string;
+  lat?: number;
+  lon?: number;
+  type: 'current' | 'forecast' | 'onecall';
+}
+
+export const getCurrentWeather = async (cityOrCoords: string | { lat: number; lon: number }): Promise<CurrentWeather> => {
+  const request: WeatherRequest = { type: 'current' };
+  
+  if (typeof cityOrCoords === 'string') {
+    request.city = cityOrCoords;
+  } else {
+    request.lat = cityOrCoords.lat;
+    request.lon = cityOrCoords.lon;
+  }
+  
+  console.log('Fetching current weather:', request);
   
   const { data, error } = await supabase.functions.invoke('weather', {
-    body: { city, type: 'current' },
+    body: request,
   });
 
   if (error) {
@@ -24,7 +40,6 @@ export const getCurrentWeather = async (city: string): Promise<CurrentWeather> =
   }
 
   if (data.error) {
-    console.error('API error:', data.error);
     throw new Error(data.error);
   }
 
@@ -36,7 +51,7 @@ export const getCurrentWeather = async (city: string): Promise<CurrentWeather> =
     temperature: Math.round(weather.main.temp),
     feelsLike: Math.round(weather.main.feels_like),
     humidity: weather.main.humidity,
-    windSpeed: Math.round(weather.wind.speed * 3.6), // Convert m/s to km/h
+    windSpeed: Math.round(weather.wind.speed * 3.6),
     description: weather.weather[0].description,
     icon: weather.weather[0].icon,
     condition: mapCondition(weather.weather[0].id),
@@ -44,40 +59,33 @@ export const getCurrentWeather = async (city: string): Promise<CurrentWeather> =
   };
 };
 
-export const getForecast = async (city: string): Promise<ForecastDay[]> => {
-  console.log('Fetching forecast for:', city);
+export const getForecast = async (cityOrCoords: string | { lat: number; lon: number }): Promise<ForecastDay[]> => {
+  const request: WeatherRequest = { type: 'forecast' };
+  
+  if (typeof cityOrCoords === 'string') {
+    request.city = cityOrCoords;
+  } else {
+    request.lat = cityOrCoords.lat;
+    request.lon = cityOrCoords.lon;
+  }
+  
+  console.log('Fetching forecast:', request);
   
   const { data, error } = await supabase.functions.invoke('weather', {
-    body: { city, type: 'forecast' },
+    body: request,
   });
 
   if (error) {
-    console.error('Edge function error:', error);
     throw new Error(error.message || 'Failed to fetch forecast data');
   }
 
   if (data.error) {
-    console.error('API error:', data.error);
     throw new Error(data.error);
   }
 
-  const { forecast, isPro } = data;
+  const { forecast } = data;
 
-  if (isPro && forecast.list) {
-    // Pro API 30-day format
-    return forecast.list.map((item: any) => ({
-      date: new Date(item.dt * 1000),
-      tempMin: Math.round(item.temp.min),
-      tempMax: Math.round(item.temp.max),
-      humidity: item.humidity,
-      windSpeed: Math.round(item.speed * 3.6),
-      description: item.weather[0].description,
-      icon: item.weather[0].icon,
-      condition: mapCondition(item.weather[0].id),
-    }));
-  }
-
-  // Free tier 5-day forecast format - group by day
+  // Group by day
   const dailyData = new Map<string, ForecastDay>();
   
   forecast.list.forEach((item: any) => {
@@ -106,8 +114,75 @@ export const getForecast = async (city: string): Promise<ForecastDay[]> => {
   return Array.from(dailyData.values()).slice(0, 5);
 };
 
+export const getHourlyForecast = async (cityOrCoords: string | { lat: number; lon: number }): Promise<HourlyForecast[]> => {
+  const request: WeatherRequest = { type: 'forecast' };
+  
+  if (typeof cityOrCoords === 'string') {
+    request.city = cityOrCoords;
+  } else {
+    request.lat = cityOrCoords.lat;
+    request.lon = cityOrCoords.lon;
+  }
+  
+  console.log('Fetching hourly forecast:', request);
+  
+  const { data, error } = await supabase.functions.invoke('weather', {
+    body: request,
+  });
+
+  if (error) {
+    throw new Error(error.message || 'Failed to fetch hourly forecast');
+  }
+
+  if (data.error) {
+    throw new Error(data.error);
+  }
+
+  const { forecast } = data;
+
+  // Get next 24 hours (8 x 3-hour intervals)
+  return forecast.list.slice(0, 8).map((item: any) => ({
+    time: new Date(item.dt * 1000),
+    temperature: Math.round(item.main.temp),
+    feelsLike: Math.round(item.main.feels_like),
+    humidity: item.main.humidity,
+    description: item.weather[0].description,
+    icon: item.weather[0].icon,
+    condition: mapCondition(item.weather[0].id),
+    pop: Math.round((item.pop || 0) * 100),
+  }));
+};
+
+export const getWeatherAlerts = async (cityOrCoords: string | { lat: number; lon: number }): Promise<WeatherAlert[]> => {
+  const request: WeatherRequest = { type: 'onecall' };
+  
+  if (typeof cityOrCoords === 'string') {
+    request.city = cityOrCoords;
+  } else {
+    request.lat = cityOrCoords.lat;
+    request.lon = cityOrCoords.lon;
+  }
+  
+  console.log('Fetching weather alerts:', request);
+  
+  const { data, error } = await supabase.functions.invoke('weather', {
+    body: request,
+  });
+
+  if (error || data.error || !data.data?.alerts) {
+    return [];
+  }
+
+  return data.data.alerts.map((alert: any) => ({
+    event: alert.event,
+    sender: alert.sender_name,
+    start: new Date(alert.start * 1000),
+    end: new Date(alert.end * 1000),
+    description: alert.description,
+    tags: alert.tags || [],
+  }));
+};
+
 export const getWeatherIconUrl = (icon: string): string => {
   return `https://openweathermap.org/img/wn/${icon}@2x.png`;
 };
-
-export const isUsingDemoData = (): boolean => false;
