@@ -5,9 +5,8 @@ import CurrentWeatherCard from '@/components/CurrentWeatherCard';
 import ForecastSection from '@/components/ForecastSection';
 import LoadingState from '@/components/LoadingState';
 import ErrorMessage from '@/components/ErrorMessage';
-import DemoBanner from '@/components/DemoBanner';
 import { CurrentWeather, ForecastDay } from '@/types/weather';
-import { getCurrentWeather, getForecast, isUsingDemoData } from '@/services/weatherService';
+import { getCurrentWeather, getForecast } from '@/services/weatherService';
 import { useToast } from '@/hooks/use-toast';
 
 const Index = () => {
@@ -69,12 +68,9 @@ const Index = () => {
             </h1>
           </div>
           <p className="text-muted-foreground">
-            Real-time weather updates & 30-day forecasts
+            Real-time weather updates & forecasts
           </p>
         </header>
-
-        {/* Demo Banner */}
-        {isUsingDemoData() && <DemoBanner />}
 
         {/* Search */}
         <div className="mb-8">
@@ -98,7 +94,7 @@ const Index = () => {
               {forecast.length > 0 && (
                 <ForecastSection 
                   forecast={forecast} 
-                  title={isUsingDemoData() ? "30-Day Forecast (Demo)" : "Weather Forecast"}
+                  title="Weather Forecast"
                 />
               )}
             </>
