@@ -22,6 +22,34 @@ export interface ForecastDay {
   condition: WeatherCondition;
 }
 
+export interface HourlyForecast {
+  time: Date;
+  temperature: number;
+  feelsLike: number;
+  humidity: number;
+  description: string;
+  icon: string;
+  condition: WeatherCondition;
+  pop: number; // Probability of precipitation
+}
+
+export interface WeatherAlert {
+  event: string;
+  sender: string;
+  start: Date;
+  end: Date;
+  description: string;
+  tags: string[];
+}
+
+export interface SavedCity {
+  id: string;
+  name: string;
+  country: string;
+  lat?: number;
+  lon?: number;
+}
+
 export type WeatherCondition = 
   | 'clear'
   | 'clouds'
