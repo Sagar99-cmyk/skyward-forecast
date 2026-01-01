@@ -25,7 +25,7 @@ const SearchBar = ({ onSearch, isLoading }: SearchBarProps) => {
           <MapPin className="w-5 h-5 text-muted-foreground" />
           <Input
             type="text"
-            placeholder="Search city..."
+            placeholder="Bangalore"
             value={city}
             onChange={(e) => setCity(e.target.value)}
             className="border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground/60 text-foreground"
