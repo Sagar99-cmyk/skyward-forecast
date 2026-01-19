@@ -1,13 +1,14 @@
-import { ForecastDay } from '@/types/weather';
+import { ForecastDay, TemperatureUnit } from '@/types/weather';
 import ForecastCard from './ForecastCard';
 import { Calendar } from 'lucide-react';
 
 interface ForecastSectionProps {
   forecast: ForecastDay[];
   title?: string;
+  unit?: TemperatureUnit;
 }
 
-const ForecastSection = ({ forecast, title = "30-Day Forecast" }: ForecastSectionProps) => {
+const ForecastSection = ({ forecast, title = "5-Day Forecast", unit = 'celsius' }: ForecastSectionProps) => {
   return (
     <div className="animate-fade-in">
       <div className="flex items-center gap-2 mb-4">
@@ -18,9 +19,14 @@ const ForecastSection = ({ forecast, title = "30-Day Forecast" }: ForecastSectio
         </span>
       </div>
       
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 gap-3 max-h-[500px] overflow-y-auto pr-2 scrollbar-thin">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
         {forecast.map((day, index) => (
-          <ForecastCard key={day.date.toISOString()} forecast={day} index={index} />
+          <ForecastCard 
+            key={day.date.toISOString()} 
+            forecast={day} 
+            index={index}
+            unit={unit}
+          />
         ))}
       </div>
     </div>

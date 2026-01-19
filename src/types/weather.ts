@@ -5,10 +5,24 @@ export interface CurrentWeather {
   feelsLike: number;
   humidity: number;
   windSpeed: number;
+  windDirection: number;
+  pressure: number;
+  visibility: number;
   description: string;
   icon: string;
   condition: WeatherCondition;
   timestamp: number;
+  sunrise: number;
+  sunset: number;
+  uvIndex?: number;
+  aqi?: AirQuality;
+}
+
+export interface AirQuality {
+  aqi: number;
+  category: 'Good' | 'Moderate' | 'Unhealthy for Sensitive Groups' | 'Unhealthy' | 'Very Unhealthy' | 'Hazardous';
+  pm2_5: number;
+  pm10: number;
 }
 
 export interface ForecastDay {
@@ -30,7 +44,8 @@ export interface HourlyForecast {
   description: string;
   icon: string;
   condition: WeatherCondition;
-  pop: number; // Probability of precipitation
+  pop: number;
+  windSpeed: number;
 }
 
 export interface WeatherAlert {
@@ -62,8 +77,19 @@ export type WeatherCondition =
 
 export interface WeatherError {
   message: string;
-  code?: string;
+  code: WeatherErrorCode;
+  retryable: boolean;
 }
+
+export type WeatherErrorCode = 
+  | 'NETWORK_ERROR'
+  | 'API_KEY_INVALID'
+  | 'CITY_NOT_FOUND'
+  | 'RATE_LIMIT'
+  | 'SERVER_ERROR'
+  | 'TIMEOUT'
+  | 'LOCATION_DENIED'
+  | 'UNKNOWN';
 
 export interface GeoLocation {
   lat: number;
@@ -71,3 +97,13 @@ export interface GeoLocation {
   name: string;
   country: string;
 }
+
+export interface CachedWeatherData {
+  current: CurrentWeather;
+  forecast: ForecastDay[];
+  hourly: HourlyForecast[];
+  alerts: WeatherAlert[];
+  timestamp: number;
+}
+
+export type TemperatureUnit = 'celsius' | 'fahrenheit';
