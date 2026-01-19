@@ -17,6 +17,18 @@ interface GeoLocation {
   country: string;
 }
 
+interface WeatherError {
+  message: string;
+  code: string;
+  retryable: boolean;
+}
+
+const createError = (message: string, code: string, retryable = false): WeatherError => ({
+  message,
+  code,
+  retryable,
+});
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -26,11 +38,21 @@ serve(async (req) => {
     const { city, lat, lon, type } = await req.json();
     
     if (!city && (!lat || !lon)) {
-      throw new Error('City or coordinates are required');
+      return new Response(JSON.stringify({ 
+        error: createError('City name or coordinates are required', 'INVALID_INPUT', false)
+      }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
     if (!API_KEY) {
-      throw new Error('OpenWeatherMap API key is not configured');
+      return new Response(JSON.stringify({ 
+        error: createError('Weather service is not configured. Please contact support.', 'API_KEY_INVALID', false)
+      }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
     let location: GeoLocation;
@@ -43,7 +65,20 @@ serve(async (req) => {
       );
       
       if (!reverseGeoResponse.ok) {
-        throw new Error('Failed to reverse geocode location');
+        if (reverseGeoResponse.status === 401) {
+          return new Response(JSON.stringify({ 
+            error: createError('Invalid API key', 'API_KEY_INVALID', false)
+          }), {
+            status: 401,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({ 
+          error: createError('Failed to determine location', 'SERVER_ERROR', true)
+        }), {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
       }
       
       const reverseGeoData = await reverseGeoResponse.json();
@@ -60,19 +95,47 @@ serve(async (req) => {
       }
     } else {
       // Forward geocoding from city name
-      console.log(`Fetching weather for city: ${city}, type: ${type}`);
+      const sanitizedCity = city.trim().substring(0, 100);
+      console.log(`Fetching weather for city: ${sanitizedCity}, type: ${type}`);
+      
       const geoResponse = await fetch(
-        `${GEO_URL}/direct?q=${encodeURIComponent(city)}&limit=1&appid=${API_KEY}`
+        `${GEO_URL}/direct?q=${encodeURIComponent(sanitizedCity)}&limit=1&appid=${API_KEY}`
       );
       
       if (!geoResponse.ok) {
-        throw new Error('Failed to find location');
+        if (geoResponse.status === 401) {
+          return new Response(JSON.stringify({ 
+            error: createError('Invalid API key', 'API_KEY_INVALID', false)
+          }), {
+            status: 401,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        if (geoResponse.status === 429) {
+          return new Response(JSON.stringify({ 
+            error: createError('Too many requests. Please try again later.', 'RATE_LIMIT', true)
+          }), {
+            status: 429,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({ 
+          error: createError('Failed to find location', 'SERVER_ERROR', true)
+        }), {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
       }
       
       const geoData = await geoResponse.json();
       
       if (!geoData || geoData.length === 0) {
-        throw new Error('City not found. Please check the spelling and try again.');
+        return new Response(JSON.stringify({ 
+          error: createError(`City "${sanitizedCity}" not found. Please check the spelling and try again.`, 'CITY_NOT_FOUND', false)
+        }), {
+          status: 404,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
       }
       
       location = {
@@ -84,33 +147,82 @@ serve(async (req) => {
     }
 
     if (type === 'current') {
-      const weatherResponse = await fetch(
-        `${BASE_URL}/weather?lat=${location.lat}&lon=${location.lon}&units=metric&appid=${API_KEY}`
-      );
+      // Fetch current weather and air pollution in parallel
+      const [weatherResponse, airPollutionResponse] = await Promise.all([
+        fetch(`${BASE_URL}/weather?lat=${location.lat}&lon=${location.lon}&units=metric&appid=${API_KEY}`),
+        fetch(`${BASE_URL}/air_pollution?lat=${location.lat}&lon=${location.lon}&appid=${API_KEY}`).catch(() => null),
+      ]);
       
       if (!weatherResponse.ok) {
         if (weatherResponse.status === 401) {
-          throw new Error('Invalid API key. Please check your OpenWeatherMap API key.');
+          return new Response(JSON.stringify({ 
+            error: createError('Invalid API key', 'API_KEY_INVALID', false)
+          }), {
+            status: 401,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
         }
-        throw new Error('Failed to fetch weather data');
+        if (weatherResponse.status === 429) {
+          return new Response(JSON.stringify({ 
+            error: createError('Too many requests. Please try again later.', 'RATE_LIMIT', true)
+          }), {
+            status: 429,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({ 
+          error: createError('Failed to fetch weather data', 'SERVER_ERROR', true)
+        }), {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
       }
       
       const weatherData = await weatherResponse.json();
+      let airPollution = null;
+      
+      if (airPollutionResponse?.ok) {
+        const apData = await airPollutionResponse.json();
+        if (apData?.list?.[0]) {
+          const aqiValue = apData.list[0].main.aqi;
+          const components = apData.list[0].components;
+          const categories = ['Good', 'Moderate', 'Unhealthy for Sensitive Groups', 'Unhealthy', 'Very Unhealthy', 'Hazardous'];
+          airPollution = {
+            aqi: aqiValue,
+            category: categories[Math.min(aqiValue - 1, 5)] || 'Unknown',
+            pm2_5: components.pm2_5,
+            pm10: components.pm10,
+          };
+        }
+      }
       
       return new Response(JSON.stringify({
         location,
         weather: weatherData,
+        airPollution,
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     } else if (type === 'forecast') {
-      // 5-day/3-hour forecast (includes hourly data)
       const forecastResponse = await fetch(
         `${BASE_URL}/forecast?lat=${location.lat}&lon=${location.lon}&units=metric&appid=${API_KEY}`
       );
       
       if (!forecastResponse.ok) {
-        throw new Error('Failed to fetch forecast data');
+        if (forecastResponse.status === 429) {
+          return new Response(JSON.stringify({ 
+            error: createError('Too many requests. Please try again later.', 'RATE_LIMIT', true)
+          }), {
+            status: 429,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({ 
+          error: createError('Failed to fetch forecast data', 'SERVER_ERROR', true)
+        }), {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
       }
       
       const forecastData = await forecastResponse.json();
@@ -122,8 +234,7 @@ serve(async (req) => {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     } else if (type === 'onecall') {
-      // One Call API for hourly + alerts (requires subscription)
-      // Fallback to regular forecast if One Call fails
+      // Try One Call API for alerts (requires subscription)
       try {
         const oneCallResponse = await fetch(
           `${BASE_URL.replace('/2.5', '/3.0')}/onecall?lat=${location.lat}&lon=${location.lon}&units=metric&exclude=minutely&appid=${API_KEY}`
@@ -143,7 +254,7 @@ serve(async (req) => {
         console.log('One Call API not available, using forecast');
       }
       
-      // Fallback: use regular forecast for hourly data
+      // Fallback: use regular forecast
       const forecastResponse = await fetch(
         `${BASE_URL}/forecast?lat=${location.lat}&lon=${location.lon}&units=metric&appid=${API_KEY}`
       );
@@ -158,12 +269,32 @@ serve(async (req) => {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     } else {
-      throw new Error('Invalid type parameter. Use "current", "forecast", or "onecall".');
+      return new Response(JSON.stringify({ 
+        error: createError('Invalid request type', 'INVALID_INPUT', false)
+      }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
   } catch (error) {
     console.error('Error in weather function:', error);
+    
+    // Check for network/timeout errors
+    if (error instanceof TypeError && error.message.includes('network')) {
+      return new Response(JSON.stringify({ 
+        error: createError('Network error. Please check your connection.', 'NETWORK_ERROR', true)
+      }), {
+        status: 503,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    
     return new Response(JSON.stringify({ 
-      error: error instanceof Error ? error.message : 'An unexpected error occurred' 
+      error: createError(
+        error instanceof Error ? error.message : 'An unexpected error occurred',
+        'UNKNOWN',
+        true
+      )
     }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
